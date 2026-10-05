@@ -1,0 +1,40 @@
+name: typoal
+services:
+  api:
+    build:
+      context: .
+      target: api
+    restart: unless-stopped
+    environment:
+      API_ADDR: 0.0.0.0:42732
+      DATABASE_PATH: /data/blog.db
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Run pnpm setup or set ADMIN_PASSWORD in .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SITE_NAME: ${SITE_NAME:-typoal}
+      AUTHOR_NAME: ${AUTHOR_NAME:-typoal 作者}
+      AUTHOR_BIO: ${AUTHOR_BIO:-一个热爱创造的人，记录技术、生活与沿途的风景。}
+    volumes:
+      - blog-data:/data
+    networks:
+      - blog
+  web:
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "42731"
+      API_URL: http://api:42732
+    ports:
+      - "0.0.0.0:42731:42731"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - blog
+volumes:
+  blog-data:
+networks:
+  blog:
