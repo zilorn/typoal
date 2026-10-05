@@ -1,0 +1,43 @@
+{
+  "name": "typoal",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
+    "dev:web": "vite --host 0.0.0.0 --port 3000",
+    "dev:api": "node --env-file-if-exists=.env scripts/api.mjs",
+    "build": "vite build",
+    "start": "node --env-file-if-exists=.env scripts/start.mjs",
+    "check": "tsc --noEmit && eslint src scripts vite.config.ts",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "format": "prettier --write src scripts tests *.ts *.js *.json *.md *.yaml"
+  },
+  "dependencies": {
+    "@solidjs/meta": "^0.29.4",
+    "@solidjs/router": "^1.0.0",
+    "@solidjs/start": "2.0.5",
+    "marked": "^17.0.0",
+    "sanitize-html": "^2.17.0",
+    "solid-js": "^1.9.10"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^24.10.0",
+    "@types/sanitize-html": "^2.16.0",
+    "eslint": "^9.39.0",
+    "eslint-plugin-solid": "^0.14.5",
+    "nitro": "3.0.260903-beta",
+    "prettier": "^3.9.9",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0",
+    "vite": "^8.3.2",
+    "vitest": "^4.0.0"
+  }
+}
