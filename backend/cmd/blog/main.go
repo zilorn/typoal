@@ -31,9 +31,14 @@ func main() {
 		os.Exit(1)
 	}
 	defer store.Close()
+	handler, err := blog.NewServer(store, blog.Config{Password: password, ResetPassword: env("ADMIN_PASSWORD_RESET", "false") == "true", CookieSecure: env("COOKIE_SECURE", "false") == "true", SiteName: env("SITE_NAME", "typoal"), AuthorName: env("AUTHOR_NAME", "typoal 作者"), AuthorBio: env("AUTHOR_BIO", "一个热爱创造的人，记录技术、生活与沿途的风景。")})
+	if err != nil {
+		slog.Error("initialize server", "error", err)
+		os.Exit(1)
+	}
 	server := &http.Server{
 		Addr:              env("API_ADDR", "0.0.0.0:8080"),
-		Handler:           blog.NewServer(store, blog.Config{Password: password, CookieSecure: env("COOKIE_SECURE", "false") == "true", SiteName: env("SITE_NAME", "typoal"), AuthorName: env("AUTHOR_NAME", "typoal 作者"), AuthorBio: env("AUTHOR_BIO", "一个热爱创造的人，记录技术、生活与沿途的风景。")}),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

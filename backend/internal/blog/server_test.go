@@ -18,7 +18,11 @@ func fixture(t *testing.T) (*Store, http.Handler) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	return s, NewServer(s, Config{Password: "test-password-only", SiteName: "typoal"})
+	h, err := NewServer(s, Config{Password: "test-password-only", SiteName: "typoal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, h
 }
 
 func request(h http.Handler, method, path, body, cookie string) *httptest.ResponseRecorder {
@@ -160,7 +164,10 @@ func TestPersistenceAndEmptyInitialStore(t *testing.T) {
 	if len(articles) != 0 {
 		t.Fatal("new deployment must start without articles")
 	}
-	h := NewServer(s, Config{Password: "test-password-only"})
+	h, err := NewServer(s, Config{Password: "test-password-only"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	cookie := login(t, h)
 	a, err := s.Save(context.Background(), "", Input{Title: "Persistent", Content: "text", Status: "published"})
 	if err != nil {
@@ -171,7 +178,10 @@ func TestPersistenceAndEmptyInitialStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h = NewServer(s, Config{Password: "test-password-only"})
+	h, err = NewServer(s, Config{Password: "test-password-only"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if w := request(h, "GET", "/api/articles?scope=all", "", cookie); w.Code != 200 {
 		t.Fatal("session did not persist")
 	}
@@ -211,5 +221,86 @@ func TestConcurrentWrites(t *testing.T) {
 	articles, _ := s.List(context.Background(), false)
 	if len(articles) != 12 {
 		t.Fatal("concurrent writes lost")
+	}
+}
+
+func TestChangePassword(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "password.db")
+	s, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := NewServer(s, Config{Password: "test-password-only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := request(h, "POST", "/api/auth/password", `{"currentPassword":"test-password-only","newPassword":"another-password-value"}`, ""); w.Code != 401 {
+		t.Fatalf("anonymous password change allowed: %d", w.Code)
+	}
+	cookie := login(t, h)
+	otherCookie := login(t, h)
+	for _, tc := range []struct {
+		body string
+		want int
+	}{
+		{`{"currentPassword":"wrong-password-value","newPassword":"another-password-value"}`, 403},
+		{`{"currentPassword":"test-password-only","newPassword":"short"}`, 422},
+		{`{"currentPassword":"test-password-only","newPassword":"test-password-only"}`, 422},
+	} {
+		if w := request(h, "POST", "/api/auth/password", tc.body, cookie); w.Code != tc.want {
+			t.Fatalf("change %s: got %d want %d", tc.body, w.Code, tc.want)
+		}
+	}
+	w := request(h, "POST", "/api/auth/password", `{"currentPassword":"test-password-only","newPassword":"another-password-value"}`, cookie)
+	if w.Code != 200 {
+		t.Fatalf("change password: %d %s", w.Code, w.Body.String())
+	}
+	refreshed := w.Result().Cookies()[0]
+	if !refreshed.HttpOnly || refreshed.SameSite != http.SameSiteStrictMode {
+		t.Fatal("unsafe cookie after password change")
+	}
+	newCookie := refreshed.Name + "=" + refreshed.Value
+	if got := request(h, "GET", "/api/articles?scope=all", "", newCookie); got.Code != 200 {
+		t.Fatal("current device lost its session after password change")
+	}
+	if got := request(h, "GET", "/api/articles?scope=all", "", otherCookie); got.Code != 401 {
+		t.Fatal("other sessions survived the password change")
+	}
+	if got := request(h, "POST", "/api/auth/login", `{"password":"test-password-only"}`, ""); got.Code != 401 {
+		t.Fatal("old password still accepted")
+	}
+	if got := request(h, "POST", "/api/auth/login", `{"password":"another-password-value"}`, ""); got.Code != 200 {
+		t.Fatal("new password rejected")
+	}
+	s.Close()
+
+	s, err = OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	h, err = NewServer(s, Config{Password: "test-password-only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := request(h, "POST", "/api/auth/login", `{"password":"test-password-only"}`, ""); got.Code != 401 {
+		t.Fatal("environment password overwrote the changed password after restart")
+	}
+	if got := request(h, "POST", "/api/auth/login", `{"password":"another-password-value"}`, ""); got.Code != 200 {
+		t.Fatal("changed password did not persist")
+	}
+
+	// ADMIN_PASSWORD_RESET restores the environment password when the author
+	// loses access, and revokes the sessions opened with the old password.
+	resetCookie := request(h, "POST", "/api/auth/login", `{"password":"another-password-value"}`, "").Result().Cookies()[0]
+	h, err = NewServer(s, Config{Password: "reset-password-value", ResetPassword: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := request(h, "GET", "/api/articles?scope=all", "", resetCookie.Name+"="+resetCookie.Value); got.Code != 401 {
+		t.Fatal("reset did not revoke sessions")
+	}
+	if got := request(h, "POST", "/api/auth/login", `{"password":"reset-password-value"}`, ""); got.Code != 200 {
+		t.Fatal("reset password rejected")
 	}
 }

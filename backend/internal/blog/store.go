@@ -65,7 +65,8 @@ func OpenStore(path string) (*Store, error) {
 		tags TEXT NOT NULL, cover TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('draft','published')),
 		featured INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, published_at TEXT NOT NULL);
 		CREATE INDEX IF NOT EXISTS articles_public ON articles(status, published_at DESC);
-		CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);`)
+		CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
+		CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`)
 	if err == nil {
 		err = s.migrateLegacyLinks()
 	}
@@ -222,5 +223,27 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	if err == nil && n == 0 {
 		return ErrNotFound
 	}
+	return err
+}
+
+// PasswordHash returns the stored administrator password hash. An empty string
+// means no password has been persisted yet and the environment value must seed
+// one.
+func (s *Store) PasswordHash(ctx context.Context) (string, error) {
+	var hash string
+	err := s.db.QueryRowContext(ctx, "SELECT value FROM settings WHERE key='password_hash'").Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return hash, err
+}
+
+func (s *Store) SetPasswordHash(ctx context.Context, hash string) error {
+	_, err := s.db.ExecContext(ctx, "INSERT INTO settings(key,value) VALUES('password_hash',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", hash)
+	return err
+}
+
+func (s *Store) ClearSessions(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM sessions")
 	return err
 }

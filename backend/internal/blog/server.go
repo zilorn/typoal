@@ -1,8 +1,8 @@
 package blog
 
 import (
+	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
@@ -18,11 +18,12 @@ import (
 )
 
 type Config struct {
-	Password     string
-	CookieSecure bool
-	SiteName     string
-	AuthorName   string
-	AuthorBio    string
+	Password      string
+	ResetPassword bool
+	CookieSecure  bool
+	SiteName      string
+	AuthorName    string
+	AuthorBio     string
 }
 
 type attempt struct {
@@ -31,15 +32,34 @@ type attempt struct {
 }
 
 type Server struct {
-	store    *Store
-	config   Config
-	password [32]byte
-	mu       sync.Mutex
-	attempts map[string]attempt
+	store        *Store
+	config       Config
+	authMu       sync.RWMutex
+	passwordHash string
+	mu           sync.Mutex
+	attempts     map[string]attempt
 }
 
-func NewServer(store *Store, config Config) http.Handler {
-	s := &Server{store: store, config: config, password: sha256.Sum256([]byte(config.Password)), attempts: make(map[string]attempt)}
+func NewServer(store *Store, config Config) (http.Handler, error) {
+	hash, err := store.PasswordHash(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	if hash == "" || config.ResetPassword {
+		if hash, err = hashPassword(config.Password); err != nil {
+			return nil, err
+		}
+		if err := store.SetPasswordHash(context.Background(), hash); err != nil {
+			return nil, err
+		}
+		if config.ResetPassword {
+			// A deliberate reset invalidates every existing session.
+			if err := store.ClearSessions(context.Background()); err != nil {
+				return nil, err
+			}
+		}
+	}
+	s := &Server{store: store, config: config, passwordHash: hash, attempts: make(map[string]attempt)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		if err := store.db.PingContext(r.Context()); err != nil {
@@ -53,6 +73,7 @@ func NewServer(store *Store, config Config) http.Handler {
 	})
 	mux.HandleFunc("POST /api/auth/login", s.login)
 	mux.HandleFunc("POST /api/auth/logout", s.logout)
+	mux.HandleFunc("POST /api/auth/password", s.changePassword)
 	mux.HandleFunc("GET /api/auth/session", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]bool{"authenticated": s.authenticated(r)})
 	})
@@ -83,7 +104,7 @@ func NewServer(store *Store, config Config) http.Handler {
 			}
 		}
 		mux.ServeHTTP(w, r)
-	})
+	}), nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -145,16 +166,21 @@ func (s *Server) setCookie(w http.ResponseWriter, value string, age int) {
 	http.SetCookie(w, &http.Cookie{Name: "typoal_session", Value: value, Path: "/", MaxAge: age, Expires: time.Now().Add(time.Duration(age) * time.Second), HttpOnly: true, Secure: s.config.CookieSecure, SameSite: http.SameSiteStrictMode})
 }
 
-func (s *Server) login(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		Password string `json:"password"`
-	}
-	if !decode(w, r, &input) {
-		return
-	}
+func (s *Server) checkPassword(password string) bool {
+	s.authMu.RLock()
+	hash := s.passwordHash
+	s.authMu.RUnlock()
+	return verifyPassword(hash, password)
+}
+
+// throttle counts an attempt for the client IP and reports whether it may
+// proceed. It is shared by login and password changes so a logged-in attacker
+// cannot brute-force the current password without limit.
+func (s *Server) throttle(w http.ResponseWriter, r *http.Request) (string, bool) {
 	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
 	now := time.Now()
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	for key, value := range s.attempts {
 		if now.After(value.until) {
 			delete(s.attempts, key)
@@ -162,19 +188,37 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	a := s.attempts[ip]
 	if a.count >= 10 {
-		s.mu.Unlock()
 		w.Header().Set("Retry-After", "300")
 		writeError(w, 429, "尝试次数过多，请 5 分钟后再试")
-		return
+		return ip, false
 	}
 	if a.count == 0 {
 		a.until = now.Add(5 * time.Minute)
 	}
 	a.count++
 	s.attempts[ip] = a
+	return ip, true
+}
+
+func (s *Server) clearAttempts(ip string) {
+	s.mu.Lock()
+	delete(s.attempts, ip)
 	s.mu.Unlock()
-	hash := sha256.Sum256([]byte(input.Password))
-	if len(input.Password) > 512 || subtle.ConstantTimeCompare(hash[:], s.password[:]) != 1 {
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Password string `json:"password"`
+	}
+	if !decode(w, r, &input) {
+		return
+	}
+	ip, ok := s.throttle(w, r)
+	if !ok {
+		return
+	}
+	now := time.Now()
+	if !s.checkPassword(input.Password) {
 		writeError(w, 401, "密码不正确，请重试")
 		return
 	}
@@ -200,9 +244,72 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "暂时无法登录")
 		return
 	}
-	s.mu.Lock()
-	delete(s.attempts, ip)
-	s.mu.Unlock()
+	s.clearAttempts(ip)
+	s.setCookie(w, token, 7*24*3600)
+	writeJSON(w, 200, map[string]bool{"authenticated": true})
+}
+
+func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
+	if !s.authorize(w, r) {
+		return
+	}
+	var input struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+	}
+	if !decode(w, r, &input) {
+		return
+	}
+	if !validPassword(input.NewPassword) {
+		writeError(w, 422, "新密码需要 12 到 512 个字节")
+		return
+	}
+	if input.NewPassword == input.CurrentPassword {
+		writeError(w, 422, "新密码不能与当前密码相同")
+		return
+	}
+	ip, ok := s.throttle(w, r)
+	if !ok {
+		return
+	}
+	if !s.checkPassword(input.CurrentPassword) {
+		// 403 keeps "wrong current password" distinct from an expired session,
+		// so the dashboard can show either the field error or the login form.
+		writeError(w, 403, "当前密码不正确")
+		return
+	}
+	s.clearAttempts(ip)
+	hash, err := hashPassword(input.NewPassword)
+	if err != nil {
+		writeError(w, 500, "暂时无法修改密码，请稍后重试")
+		return
+	}
+	// Persist the new hash, drop every session, and issue a fresh one for this
+	// device in a single transaction so no stale session survives the change.
+	token := randomID() + randomID()
+	tx, err := s.store.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, 500, "暂时无法修改密码，请稍后重试")
+		return
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(r.Context(), "INSERT INTO settings(key,value) VALUES('password_hash',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", hash)
+	if err == nil {
+		_, err = tx.ExecContext(r.Context(), "DELETE FROM sessions")
+	}
+	if err == nil {
+		_, err = tx.ExecContext(r.Context(), "INSERT INTO sessions(token_hash,expires_at) VALUES (?,?)", tokenHash(token), time.Now().Add(7*24*time.Hour).Unix())
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		writeError(w, 500, "暂时无法修改密码，请稍后重试")
+		return
+	}
+	s.authMu.Lock()
+	s.passwordHash = hash
+	s.authMu.Unlock()
 	s.setCookie(w, token, 7*24*3600)
 	writeJSON(w, 200, map[string]bool{"authenticated": true})
 }
