@@ -1803,6 +1803,7 @@ p {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 .admin-heading .page-intro {
   margin-bottom: 35px;
@@ -1954,6 +1955,8 @@ p {
   border-radius: 12px;
   padding: 26px;
   width: min(440px, calc(100% - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
   box-shadow: 0 20px 80px #0002;
 }
 .dialog::backdrop {
@@ -1989,6 +1992,18 @@ p {
   gap: 12px;
   margin-top: 25px;
   flex-wrap: wrap;
+}
+.password-form .dialog-note {
+  font-size: 11px;
+  line-height: 1.9;
+  color: var(--subtle);
+  margin-bottom: 4px;
+}
+.password-form .field-label:first-of-type {
+  margin-top: 12px;
+}
+.password-form .error-message {
+  margin-bottom: 0;
 }
 .editor-page {
   padding-top: 35px;

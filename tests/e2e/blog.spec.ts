@@ -188,3 +188,65 @@ test("375px pages and 390px editor do not overflow", async ({ page }) => {
   await expect(page.getByLabel("文章标题")).not.toBeVisible();
   await noOverflow(page);
 });
+
+test("author can change the admin password and stay signed in", async ({
+  page,
+}, info) => {
+  const current = "typoal-e2e-password";
+  const updated = "typoal-e2e-updated-password";
+  await signIn(page);
+  await page.getByRole("button", { name: "修改密码" }).click();
+  const dialog = page.getByRole("dialog", { name: "修改管理密码" });
+  await expect(dialog).toBeVisible();
+  await noOverflow(page);
+  await page.screenshot({
+    path: `test-results/${info.project.name}-change-password.png`,
+  });
+  let changed = false;
+  try {
+    await dialog.getByLabel("当前密码", { exact: true }).fill(current);
+    await dialog.getByLabel("新密码", { exact: true }).fill(updated);
+    await dialog
+      .getByLabel("确认新密码", { exact: true })
+      .fill("typoal-e2e-mismatch-password");
+    await dialog.getByRole("button", { name: "保存新密码" }).click();
+    await expect(dialog.getByRole("alert")).toContainText("不一致");
+
+    await dialog.getByLabel("当前密码", { exact: true }).fill("wrong-password");
+    await dialog.getByLabel("确认新密码", { exact: true }).fill(updated);
+    await dialog.getByRole("button", { name: "保存新密码" }).click();
+    await expect(dialog.getByRole("alert")).toContainText("当前密码不正确");
+
+    await dialog.getByLabel("当前密码", { exact: true }).fill(current);
+    await dialog.getByLabel("确认新密码", { exact: true }).fill(updated);
+    await dialog.getByRole("button", { name: "保存新密码" }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByRole("status")).toContainText("密码已修改");
+    changed = true;
+    // The device that changed the password keeps its refreshed session.
+    await expect(
+      page.getByRole("heading", { name: "我的书桌." }),
+    ).toBeVisible();
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: "我的书桌." }),
+    ).toBeVisible();
+
+    const oldLogin = await page.request.post("/api/auth/login", {
+      data: { password: current },
+    });
+    expect(oldLogin.status()).toBe(401);
+    const newLogin = await page.request.post("/api/auth/login", {
+      data: { password: updated },
+    });
+    expect(newLogin.ok()).toBe(true);
+  } finally {
+    if (changed) {
+      // Restore the shared password so later project runs still sign in.
+      const restored = await page.request.post("/api/auth/password", {
+        data: { currentPassword: updated, newPassword: current },
+      });
+      expect(restored.ok()).toBe(true);
+    }
+  }
+});

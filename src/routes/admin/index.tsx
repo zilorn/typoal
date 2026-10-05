@@ -17,6 +17,12 @@ export default function Admin() {
   const [filter, setFilter] = createSignal("all");
   const [search, setSearch] = createSignal("");
   const [deleting, setDeleting] = createSignal<Article | null>(null);
+  const [passwordOpen, setPasswordOpen] = createSignal(false);
+  const [currentPassword, setCurrentPassword] = createSignal("");
+  const [newPassword, setNewPassword] = createSignal("");
+  const [confirmPassword, setConfirmPassword] = createSignal("");
+  const [passwordBusy, setPasswordBusy] = createSignal(false);
+  const [passwordError, setPasswordError] = createSignal("");
   const filtered = createMemo(() =>
     articles().filter(
       (a) =>
@@ -93,6 +99,48 @@ export default function Admin() {
       setBusy(false);
     }
   }
+  function resetPasswordForm() {
+    setPasswordOpen(false);
+    setPasswordError("");
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+  }
+  function closePasswordDialog() {
+    if (passwordBusy()) return;
+    resetPasswordForm();
+  }
+  async function changePassword(e: SubmitEvent) {
+    e.preventDefault();
+    setPasswordError("");
+    if (newPassword() !== confirmPassword()) {
+      setPasswordError("两次输入的新密码不一致。");
+      return;
+    }
+    setPasswordBusy(true);
+    try {
+      await api("auth/password", {
+        method: "POST",
+        body: JSON.stringify({
+          currentPassword: currentPassword(),
+          newPassword: newPassword(),
+        }),
+      });
+      resetPasswordForm();
+      setNotice("密码已修改，其他设备上的登录已失效。");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        resetPasswordForm();
+        handleError(err);
+        return;
+      }
+      setPasswordError(
+        err instanceof Error ? err.message : "修改失败，请稍后重试。",
+      );
+    } finally {
+      setPasswordBusy(false);
+    }
+  }
   return (
     <main id="main" class="container inner-page admin-page">
       <Title>文章管理 · typoal</Title>
@@ -160,9 +208,9 @@ export default function Admin() {
                   <Icon name="arrow" size={17} />
                 </button>
                 <p class="login-note">
-                  首次使用？启动时生成的密码保存在
+                  初始密码保存在 <code>.env</code> 的
                   <br />
-                  <code>.env</code> 文件的 <code>ADMIN_PASSWORD</code> 中。
+                  <code>ADMIN_PASSWORD</code> 中，登录后可修改。
                 </p>
                 <A href="/" class="back-link">
                   <Icon name="back" size={15} />
@@ -181,6 +229,18 @@ export default function Admin() {
               <p>整理想法，让每一篇文字都有自己的位置。</p>
             </div>
             <div class="admin-heading-actions">
+              <button
+                class="button"
+                disabled={busy()}
+                onClick={() => {
+                  setError("");
+                  setPasswordError("");
+                  setPasswordOpen(true);
+                }}
+              >
+                <Icon name="lock" size={16} />
+                修改密码
+              </button>
               <button class="button" disabled={busy()} onClick={signOut}>
                 <Icon name="logout" size={16} />
                 退出
@@ -397,6 +457,82 @@ export default function Admin() {
             {busy() ? "正在删除…" : "确认删除"}
           </button>
         </div>
+      </Dialog>
+      <Dialog
+        open={passwordOpen()}
+        title="修改管理密码"
+        onClose={closePasswordDialog}
+      >
+        <form class="password-form" onSubmit={changePassword}>
+          <p class="dialog-note">
+            修改后，其他设备上的登录会失效，需要重新登录。
+          </p>
+          <label class="field-label" for="current-password">
+            当前密码
+          </label>
+          <input
+            id="current-password"
+            class="field-input"
+            type="password"
+            autocomplete="current-password"
+            required
+            maxlength={512}
+            value={currentPassword()}
+            onInput={(e) => setCurrentPassword(e.currentTarget.value)}
+          />
+          <label class="field-label" for="new-password">
+            新密码
+          </label>
+          <input
+            id="new-password"
+            class="field-input"
+            type="password"
+            autocomplete="new-password"
+            required
+            minlength={12}
+            maxlength={512}
+            value={newPassword()}
+            onInput={(e) => setNewPassword(e.currentTarget.value)}
+            placeholder="至少 12 个字符"
+          />
+          <label class="field-label" for="confirm-password">
+            确认新密码
+          </label>
+          <input
+            id="confirm-password"
+            class="field-input"
+            type="password"
+            autocomplete="new-password"
+            required
+            minlength={12}
+            maxlength={512}
+            value={confirmPassword()}
+            onInput={(e) => setConfirmPassword(e.currentTarget.value)}
+            placeholder="再次输入新密码"
+          />
+          <Show when={passwordError()}>
+            <p class="error-message" role="alert">
+              {passwordError()}
+            </p>
+          </Show>
+          <div class="dialog-actions">
+            <button
+              type="button"
+              class="button"
+              disabled={passwordBusy()}
+              onClick={closePasswordDialog}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              class="button primary"
+              disabled={passwordBusy()}
+            >
+              {passwordBusy() ? "正在保存…" : "保存新密码"}
+            </button>
+          </div>
+        </form>
       </Dialog>
     </main>
   );
