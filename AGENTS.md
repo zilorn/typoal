@@ -1,0 +1,45 @@
+# Project overview
+
+typoal is a personal blog with a Chinese reading experience and a browser-based author dashboard. The frontend uses SolidStart, TypeScript, and pnpm. A Go HTTP API owns authentication, article validation, and SQLite persistence. Docker Compose runs the web and API services, with a named volume for the database.
+
+## Common commands
+
+- `./dev.sh`: check prerequisites, install dependencies, initialize local configuration, and start both services with one command.
+- `pnpm install --frozen-lockfile`: install frontend dependencies.
+- `pnpm setup`: create a local `.env` with a randomly generated administrator password; existing configuration is preserved.
+- `pnpm dev`: start the frontend and Go API together.
+- `pnpm dev:web`: start only the SolidStart development server.
+- `pnpm dev:api`: start only the Go API (requires environment variables).
+- `pnpm check`: run TypeScript and frontend lint checks.
+- `pnpm test`: run frontend unit tests.
+- `pnpm build`: build the production frontend.
+- `cd backend && go test -race ./...`: run backend tests and the race detector.
+- `cd backend && go vet ./...`: run backend static analysis.
+- `docker compose up --build -d`: build and start the production stack.
+- `docker compose logs -f`: inspect service logs.
+- `docker compose down`: stop services while preserving article data.
+
+## Important considerations
+
+- Use pnpm for JavaScript dependencies and commit `pnpm-lock.yaml`.
+- Keep Go modules and checksums committed. Format Go changes with `gofmt`.
+- Never commit `.env`, passwords, session cookies, databases, generated builds, or local test artifacts.
+- Public API endpoints must never expose drafts. Every article mutation and private read requires a valid administrator session.
+- Keep authentication cookies HttpOnly and SameSite. Preserve same-origin checks on unsafe HTTP methods.
+- Render Markdown through the shared sanitizer. Never render untrusted HTML directly.
+- Articles are authored and stored as Markdown. Preserve GitHub Flavored Markdown support (headings, lists, links, images, fenced code, blockquotes, and tables) and consistent rendering between editor previews and published articles.
+- The Go API is the source of truth. Keep request/response types and validation aligned with the frontend.
+- Do not remove Docker volumes unless the user explicitly requests data deletion. Back up SQLite before changing its schema.
+- Bind servers to `0.0.0.0`, so they are reachable outside localhost. Development uses web port 3000 and API port 8080. Production uses web port 42731 and internal API port 42732; never reuse the development ports in production. Docker publishes only `0.0.0.0:42731`.
+- Preserve responsive layouts, keyboard accessibility, loading states, and actionable error messages.
+- Mobile UI support is required for every feature, including the public blog, navigation, search, login, article management, and Markdown editor. Check narrow screens (at least 375px and 390px), avoid horizontal page overflow, use comfortable touch targets (at least 44px), and make dialogs and editor actions usable without hover. Verify both mobile and desktop before finishing UI work.
+- Run the checks relevant to each change; verify the production build for frontend or deployment changes.
+
+## Git workflow
+
+- Inspect `git status` before editing and preserve unrelated user changes.
+- Commit completed work before finishing a task. Split substantial tasks into coherent, independently understandable commits.
+- Write commit subjects and bodies in English using Conventional Commits, for example `feat(api): add authenticated article management` or `fix(web): preserve drafts after failed saves`.
+- Stage only intentional project files; inspect the staged diff before committing.
+- Do not amend, reset, force-push, or rewrite existing history unless explicitly requested.
+- Do not push to a remote unless the user asks. Report the final commit and verification results.

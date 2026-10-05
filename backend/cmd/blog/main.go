@@ -1,0 +1,54 @@
+package main
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"typoal/blog/internal/blog"
+)
+
+func env(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func main() {
+	password := os.Getenv("ADMIN_PASSWORD")
+	if len(password) < 12 || len(password) > 512 {
+		slog.Error("ADMIN_PASSWORD must contain 12 to 512 bytes; run pnpm setup to create local configuration")
+		os.Exit(1)
+	}
+	store, err := blog.OpenStore(env("DATABASE_PATH", "./data/blog.db"), env("SEED_DEMO", "true") == "true")
+	if err != nil {
+		slog.Error("open database", "error", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+	server := &http.Server{
+		Addr:              env("API_ADDR", ":8080"),
+		Handler:           blog.NewServer(store, blog.Config{Password: password, CookieSecure: env("COOKIE_SECURE", "false") == "true", SiteName: env("SITE_NAME", "typoal"), AuthorName: env("AUTHOR_NAME", "typoal 作者"), AuthorBio: env("AUTHOR_BIO", "一个热爱创造的人，记录技术、生活与沿途的风景。")}),
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdown); err != nil {
+			slog.Error("shutdown", "error", err)
+		}
+	}()
+	slog.Info("blog API ready", "address", server.Addr)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Error("serve API", "error", err)
+		os.Exit(1)
+	}
+}
