@@ -27,6 +27,7 @@ typoal is a personal blog with a Chinese reading experience and a browser-based 
 - Never commit `.env`, passwords, session cookies, databases, generated builds, or local test artifacts.
 - Public API endpoints must never expose drafts. Every article mutation and private read requires a valid administrator session.
 - Keep authentication cookies HttpOnly and SameSite. Preserve same-origin checks on unsafe HTTP methods.
+- Store the administrator password in SQLite as a salted PBKDF2 hash. `ADMIN_PASSWORD` only seeds it when no password is stored, and `ADMIN_PASSWORD_RESET=true` restores it deliberately. Changing the password revokes every session except the one making the request.
 - Render Markdown through the shared sanitizer. Never render untrusted HTML directly.
 - Articles are authored and stored as Markdown. Preserve GitHub Flavored Markdown support (headings, lists, links, images, fenced code, blockquotes, and tables) and consistent rendering between editor previews and published articles.
 - The Go API is the source of truth. Keep request/response types and validation aligned with the frontend.
