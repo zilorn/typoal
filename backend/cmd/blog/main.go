@@ -25,14 +25,14 @@ func main() {
 		slog.Error("ADMIN_PASSWORD must contain 12 to 512 bytes; run pnpm setup to create local configuration")
 		os.Exit(1)
 	}
-	store, err := blog.OpenStore(env("DATABASE_PATH", "./data/blog.db"), env("SEED_DEMO", "true") == "true")
+	store, err := blog.OpenStore(env("DATABASE_PATH", "./data/blog.db"))
 	if err != nil {
 		slog.Error("open database", "error", err)
 		os.Exit(1)
 	}
 	defer store.Close()
 	server := &http.Server{
-		Addr:              env("API_ADDR", ":8080"),
+		Addr:              env("API_ADDR", "0.0.0.0:8080"),
 		Handler:           blog.NewServer(store, blog.Config{Password: password, CookieSecure: env("COOKIE_SECURE", "false") == "true", SiteName: env("SITE_NAME", "typoal"), AuthorName: env("AUTHOR_NAME", "typoal 作者"), AuthorBio: env("AUTHOR_BIO", "一个热爱创造的人，记录技术、生活与沿途的风景。")}),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
 	}

@@ -260,8 +260,6 @@ func (s *Server) save(w http.ResponseWriter, r *http.Request) {
 	a, err := s.store.Save(r.Context(), r.PathValue("key"), in)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrConflict):
-			writeError(w, 409, "这个链接名称已经被使用，请换一个")
 		case errors.Is(err, ErrNotFound):
 			writeError(w, 404, "文章不存在")
 		default:
@@ -328,7 +326,7 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request) {
 	feed.Version, feed.Channel.Title, feed.Channel.Link, feed.Channel.Description = "2.0", s.config.SiteName, base, s.config.AuthorBio
 	for _, a := range articles {
 		date, _ := time.Parse(time.RFC3339Nano, a.PublishedAt)
-		link := base + "/posts/" + url.PathEscape(a.Slug)
+		link := base + "/post/" + url.PathEscape(a.ID)
 		feed.Channel.Items = append(feed.Channel.Items, rssItem{Title: a.Title, Link: link, GUID: a.ID, Description: a.Excerpt, Date: date.Format(time.RFC1123Z)})
 	}
 	w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
