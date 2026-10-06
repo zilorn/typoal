@@ -2,7 +2,11 @@ module typoal/blog
 
 go 1.26.0
 
-require modernc.org/sqlite v1.60.1
+require (
+	github.com/yuin/goldmark v1.8.6
+	golang.org/x/net v0.59.0
+	modernc.org/sqlite v1.60.1
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

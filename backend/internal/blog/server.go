@@ -41,6 +41,9 @@ type Server struct {
 }
 
 func NewServer(store *Store, config Config) (http.Handler, error) {
+	if err := store.CleanupImages(context.Background()); err != nil {
+		return nil, err
+	}
 	hash, err := store.PasswordHash(context.Background())
 	if err != nil {
 		return nil, err
@@ -89,6 +92,8 @@ func NewServer(store *Store, config Config) (http.Handler, error) {
 	mux.HandleFunc("PUT /api/articles/{key}", s.save)
 	mux.HandleFunc("DELETE /api/articles/{key}", s.delete)
 	mux.HandleFunc("GET /api/feed.xml", s.feed)
+	mux.HandleFunc("POST /api/images", s.uploadImage)
+	mux.HandleFunc("GET /api/images/{kind}/{owner}/{name}", s.getImage)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
@@ -375,6 +380,8 @@ func (s *Server) save(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrNotFound):
 			writeError(w, 404, "文章不存在")
+		case errors.Is(err, ErrImage):
+			writeError(w, 422, strings.TrimPrefix(err.Error(), ErrImage.Error()+": "))
 		default:
 			slog.Error("save article", "error", err)
 			writeError(w, 500, "保存失败，请稍后重试")

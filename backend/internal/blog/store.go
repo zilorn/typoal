@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -36,17 +37,22 @@ type Article struct {
 }
 
 type Input struct {
-	Title    string   `json:"title"`
-	Excerpt  string   `json:"excerpt"`
-	Content  string   `json:"content"`
-	Category string   `json:"category"`
-	Tags     []string `json:"tags"`
-	Cover    string   `json:"cover"`
-	Status   string   `json:"status"`
-	Featured bool     `json:"featured"`
+	UploadGroup string   `json:"uploadGroup,omitempty"`
+	Title       string   `json:"title"`
+	Excerpt     string   `json:"excerpt"`
+	Content     string   `json:"content"`
+	Category    string   `json:"category"`
+	Tags        []string `json:"tags"`
+	Cover       string   `json:"cover"`
+	Status      string   `json:"status"`
+	Featured    bool     `json:"featured"`
 }
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db        *sql.DB
+	imagesDir string
+	imageMu   sync.RWMutex
+}
 
 func OpenStore(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
@@ -57,7 +63,7 @@ func OpenStore(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
+	s := &Store{db: db, imagesDir: filepath.Join(filepath.Dir(path), filepath.Base(path)+".images")}
 	_, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
 		CREATE TABLE IF NOT EXISTS articles (
 		id TEXT PRIMARY KEY, title TEXT NOT NULL,
@@ -88,6 +94,9 @@ func randomID() string {
 }
 
 func (in *Input) Validate() error {
+	if in.UploadGroup != "" && !validImageID(in.UploadGroup) {
+		return errors.New("图片上传分组无效，请刷新编辑器后重试")
+	}
 	in.Title = strings.TrimSpace(in.Title)
 	in.Content = strings.TrimSpace(in.Content)
 	in.Category = strings.TrimSpace(in.Category)
@@ -187,6 +196,8 @@ func (s *Store) Get(ctx context.Context, key string, private bool) (Article, err
 }
 
 func (s *Store) Save(ctx context.Context, id string, in Input) (Article, error) {
+	s.imageMu.Lock()
+	defer s.imageMu.Unlock()
 	if err := in.Validate(); err != nil {
 		return Article{}, err
 	}
@@ -204,17 +215,40 @@ func (s *Store) Save(ctx context.Context, id string, in Input) (Article, error) 
 	if a.Status == "published" && a.PublishedAt == "" {
 		a.PublishedAt = now
 	}
+	rollback, err := s.prepareImages(ctx, &a, in.UploadGroup)
+	if err != nil {
+		return Article{}, err
+	}
+	defer func() { rollback() }()
 	tags, _ := json.Marshal(a.Tags)
-	var err error
 	if id == "" {
 		_, err = s.db.ExecContext(ctx, "INSERT INTO articles ("+columns+") VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", a.ID, a.Title, a.Excerpt, a.Content, a.Category, string(tags), a.Cover, a.Status, a.Featured, a.CreatedAt, a.UpdatedAt, a.PublishedAt)
 	} else {
 		_, err = s.db.ExecContext(ctx, `UPDATE articles SET title=?, excerpt=?, content=?, category=?, tags=?, cover=?, status=?, featured=?, updated_at=?, published_at=? WHERE id=?`, a.Title, a.Excerpt, a.Content, a.Category, string(tags), a.Cover, a.Status, a.Featured, a.UpdatedAt, a.PublishedAt, a.ID)
 	}
-	return a, err
+	if err != nil {
+		return a, err
+	}
+	// Sources remain intact until SQLite has accepted the rewritten links.
+	rollback = func() {}
+	if err := s.cleanArticleImages(a, in.UploadGroup); err != nil {
+		return a, err
+	}
+	return a, nil
 }
 
 func (s *Store) Delete(ctx context.Context, id string) error {
+	s.imageMu.Lock()
+	defer s.imageMu.Unlock()
+	if _, err := s.Get(ctx, id, true); err != nil {
+		return err
+	}
+	// Hide the directories first; restore them if the database deletion fails.
+	restore, finish, err := s.stageImageDeletion(id)
+	if err != nil {
+		return err
+	}
+	defer func() { restore() }()
 	result, err := s.db.ExecContext(ctx, "DELETE FROM articles WHERE id=?", id)
 	if err != nil {
 		return err
@@ -223,7 +257,11 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	if err == nil && n == 0 {
 		return ErrNotFound
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	restore = func() {}
+	return finish()
 }
 
 // PasswordHash returns the stored administrator password hash. An empty string
