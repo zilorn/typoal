@@ -32,10 +32,6 @@ services:
     depends_on:
       api:
         condition: service_healthy
-        # Keep the healthy-api startup order, but never abort the whole `up`
-        # because the engine reports a transient `unhealthy`. The web server
-        # reads the API per request, so it recovers once the api is healthy.
-        required: false
     networks:
       - blog
 volumes:
