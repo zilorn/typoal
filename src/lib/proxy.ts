@@ -5,7 +5,7 @@ import { matchesOrigin } from "./origin";
 export async function proxy({ request }: APIEvent, path?: string) {
   const url = new URL(request.url);
   const maxBodyBytes =
-    url.pathname === "/api/images" ? 10 * 1024 * 1024 : 2 * 1024 * 1024;
+    url.pathname === "/api/images" ? 300 * 1024 * 1024 : 2 * 1024 * 1024;
   if (!["GET", "HEAD"].includes(request.method)) {
     const fetchSite = request.headers.get("sec-fetch-site");
     if (
@@ -58,7 +58,9 @@ export async function proxy({ request }: APIEvent, path?: string) {
         headers,
         body,
         redirect: "manual",
-        signal: AbortSignal.timeout(12000),
+        signal: AbortSignal.timeout(
+          url.pathname === "/api/images" ? 600000 : 12000,
+        ),
       },
     );
     const outgoing = new Headers({

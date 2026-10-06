@@ -157,8 +157,8 @@ export default function Editor() {
     if (!file || busy() || uploading()) return;
     setError("");
     setNotice("");
-    if (file.size > 10 * 1024 * 1024) {
-      setError("图片不能超过 10 MB，请选择较小的图片。");
+    if (file.size > 300 * 1024 * 1024) {
+      setError("图片不能超过 300 MB，请选择较小的图片。");
       imageInput.value = "";
       return;
     }
@@ -458,7 +458,7 @@ export default function Editor() {
                   <span aria-hidden="true">▧</span>
                   {uploading() ? "正在上传…" : "上传图片"}
                 </button>
-                <span>PNG / JPEG / GIF，最大 10 MB</span>
+                <span>PNG / JPEG / GIF，最大 300 MB</span>
               </div>
               <Show when={mode() === "edit"}>
                 <textarea

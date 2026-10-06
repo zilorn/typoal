@@ -22,7 +22,9 @@ export async function api<T>(
           : { "Content-Type": "application/json" }),
         ...options.headers,
       },
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(
+        options.body instanceof Blob ? 600000 : 15000,
+      ),
     });
   } catch {
     throw new ApiError("连接失败，请检查网络后重试。你的输入已保留。", 0);

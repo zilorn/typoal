@@ -152,10 +152,18 @@ func TestImageUploadValidationAndOwnership(t *testing.T) {
 	if w := uploadRequest(h, "", group, pngFixture(t)); w.Code != 401 {
 		t.Fatal("anonymous upload allowed")
 	}
-	for _, data := range [][]byte{[]byte("<svg xmlns='http://www.w3.org/2000/svg'></svg>"), pngFixture(t)[:30], bytes.Repeat([]byte("x"), maxImageBytes+1)} {
+	for _, data := range [][]byte{[]byte("<svg xmlns='http://www.w3.org/2000/svg'></svg>"), pngFixture(t)[:30]} {
 		if w := uploadRequest(h, cookie, group, data); w.Code < 400 {
 			t.Fatal("invalid file accepted")
 		}
+	}
+	oversized := httptest.NewRequest("POST", "/api/images?group="+group, strings.NewReader("unread"))
+	oversized.Header.Set("Cookie", cookie)
+	oversized.ContentLength = maxImageBytes + 1
+	tooLarge := httptest.NewRecorder()
+	h.ServeHTTP(tooLarge, oversized)
+	if tooLarge.Code != 413 || !strings.Contains(tooLarge.Body.String(), "300 MB") {
+		t.Fatal("oversized upload must be rejected before reading the body", tooLarge.Code)
 	}
 	if w := uploadRequest(h, cookie, "../../escape", pngFixture(t)); w.Code != 422 {
 		t.Fatal("invalid group accepted")

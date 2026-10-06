@@ -34,7 +34,7 @@ func main() {
 	server := &http.Server{
 		Addr:              env("API_ADDR", "0.0.0.0:8080"),
 		Handler:           handler,
-		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 600 * time.Second, WriteTimeout: 630 * time.Second, IdleTimeout: 60 * time.Second,
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

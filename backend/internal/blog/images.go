@@ -22,7 +22,7 @@ import (
 	nethtml "golang.org/x/net/html"
 )
 
-const maxImageBytes = 10 * 1024 * 1024
+const maxImageBytes = 300 * 1024 * 1024
 
 var ErrImage = errors.New("invalid image reference")
 
@@ -110,10 +110,14 @@ func (s *Server) uploadImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 422, "图片上传分组无效")
 		return
 	}
+	if r.ContentLength > maxImageBytes {
+		writeError(w, 413, "图片不能超过 300 MB")
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxImageBytes)
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeError(w, 413, "图片不能超过 10 MB")
+		writeError(w, 413, "图片不能超过 300 MB")
 		return
 	}
 	config, format, err := image.DecodeConfig(bytes.NewReader(data))

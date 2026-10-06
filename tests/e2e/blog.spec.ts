@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { mkdir, writeFile, truncate } from "node:fs/promises";
 
 async function noOverflow(page: Page) {
   const sizes = await page.evaluate(() => ({
@@ -259,17 +260,20 @@ test("uploaded images survive drafts, publish and are deleted with their article
   await page.goto("/admin/editor");
   await page.getByLabel("文章标题").fill("测试：上传图片");
   await page.getByLabel("Markdown 正文").fill("图片上传测试。\n");
-  // A tiny PNG fixture stays in isolated test requests, never in deployment data.
+  // Pad a valid PNG past 50 MB to exercise the full large-file upload path.
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAKAAAABaCAIAAACwpMoFAAABAUlEQVR4nOzTIQrAQAxE0UnJ8at7iJ6yUFi3amV4E/OJf32/T/5VIubFtdpmrlPbvxtyBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE3wg+BsAcOADPP8k03QAAAAASUVORK5CYII=",
     "base64",
   );
   const input = page.getByLabel("选择要上传的图片");
-  await input.setInputFiles({
-    name: "test.png",
-    mimeType: "image/png",
-    buffer: png,
-  });
+  const imagePath = info.outputPath("large-upload.png");
+  await mkdir(info.outputDir, { recursive: true });
+  await writeFile(imagePath, png);
+  await truncate(imagePath, 301 * 1024 * 1024);
+  await input.setInputFiles(imagePath);
+  await expect(page.getByRole("alert")).toContainText("图片不能超过 300 MB");
+  await truncate(imagePath, 51 * 1024 * 1024);
+  await input.setInputFiles(imagePath);
   await expect(page.getByRole("status")).toContainText("图片已上传");
   const markdown = await page.getByLabel("Markdown 正文").inputValue();
   const temporaryURL = markdown.match(
