@@ -250,3 +250,93 @@ test("author can change the admin password and stay signed in", async ({
     }
   }
 });
+
+test("uploaded images survive drafts, publish and are deleted with their article", async ({
+  page,
+  request,
+}, info) => {
+  await signIn(page);
+  await page.goto("/admin/editor");
+  await page.getByLabel("文章标题").fill("测试：上传图片");
+  await page.getByLabel("Markdown 正文").fill("图片上传测试。\n");
+  // A tiny PNG fixture stays in isolated test requests, never in deployment data.
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAKAAAABaCAIAAACwpMoFAAABAUlEQVR4nOzTIQrAQAxE0UnJ8at7iJ6yUFi3amV4E/OJf32/T/5VIubFtdpmrlPbvxtyBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE0wwwQQTTDDBBBNMMMEEE3wg+BsAcOADPP8k03QAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const input = page.getByLabel("选择要上传的图片");
+  await input.setInputFiles({
+    name: "test.png",
+    mimeType: "image/png",
+    buffer: png,
+  });
+  await expect(page.getByRole("status")).toContainText("图片已上传");
+  const markdown = await page.getByLabel("Markdown 正文").inputValue();
+  const temporaryURL = markdown.match(
+    /\]\((\/api\/images\/temp\/[^)]+)\)/,
+  )?.[1];
+  expect(temporaryURL).toBeTruthy();
+  expect((await request.get(temporaryURL!)).status()).toBe(401);
+  const uploadButton = page.getByRole("button", {
+    name: "上传图片",
+    exact: true,
+  });
+  const bounds = await uploadButton.boundingBox();
+  expect(bounds?.height).toBeGreaterThanOrEqual(44);
+  expect(bounds?.width).toBeGreaterThanOrEqual(44);
+  for (const width of info.project.name === "mobile" ? [375, 390] : [1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await noOverflow(page);
+  }
+  await page.screenshot({
+    path: `test-results/${info.project.name}-image-upload.png`,
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "预览", exact: true }).click();
+  const preview = page.locator(".markdown-preview img");
+  await expect(preview).toBeVisible();
+  await expect
+    .poll(() => preview.evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBe(160);
+  await page.getByRole("button", { name: "保存草稿", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("草稿已保存");
+  const articleID = new URL(page.url()).searchParams.get("id");
+  await expect(preview).toHaveAttribute(
+    "src",
+    new RegExp(`/api/images/temp/${articleID}/`),
+  );
+  await expect
+    .poll(() => preview.evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBe(160);
+  expect((await page.request.get(temporaryURL!)).status()).toBe(404);
+  await page.reload();
+  await expect(page.getByLabel("Markdown 正文")).toHaveValue(
+    new RegExp(`/api/images/temp/${articleID}/`),
+  );
+  await page.getByRole("button", { name: "预览", exact: true }).click();
+  await expect(preview).toBeVisible();
+  await page.getByRole("button", { name: "发布文章", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("文章已发布");
+  await expect(preview).toHaveAttribute(
+    "src",
+    new RegExp(`/api/images/articles/${articleID}/`),
+  );
+  await expect
+    .poll(() => preview.evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBe(160);
+  const publishedURL = (await preview.getAttribute("src"))!;
+  expect((await request.get(publishedURL)).status()).toBe(200);
+  await page.goto(`/post/${articleID}`);
+  const publishedImage = page.locator(".post-content img");
+  await expect(publishedImage).toBeVisible();
+  await expect
+    .poll(() =>
+      publishedImage.evaluate((img: HTMLImageElement) => img.naturalWidth),
+    )
+    .toBe(160);
+  await noOverflow(page);
+  expect(
+    (await page.request.delete(`/api/articles/${articleID}`)).status(),
+  ).toBe(204);
+  expect((await request.get(publishedURL)).status()).toBe(404);
+});

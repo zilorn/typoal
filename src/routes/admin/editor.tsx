@@ -47,6 +47,9 @@ export default function Editor() {
   );
   const [loading, setLoading] = createSignal(true);
   const [busy, setBusy] = createSignal(false);
+  const [uploading, setUploading] = createSignal(false);
+  let uploadGroup = "";
+  let imageInput!: HTMLInputElement;
   const [error, setError] = createSignal("");
   const [loadError, setLoadError] = createSignal("");
   const [notice, setNotice] = createSignal("");
@@ -74,7 +77,7 @@ export default function Editor() {
   }
   onMount(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (dirty()) event.preventDefault();
+      if (dirty() || uploading()) event.preventDefault();
     };
     window.addEventListener("beforeunload", beforeUnload);
     onCleanup(() => window.removeEventListener("beforeunload", beforeUnload));
@@ -109,11 +112,12 @@ export default function Editor() {
     })();
   });
   useBeforeLeave((event) => {
-    if (!dirty() || loading()) return;
+    if ((!dirty() && !uploading()) || loading()) return;
     event.preventDefault();
     setLeaveAction(() => () => event.retry(true));
   });
   async function preview() {
+    if (uploading() || busy()) return;
     setMode("preview");
     setPreviewBusy(true);
     setPreviewError("");
@@ -131,7 +135,7 @@ export default function Editor() {
     }
   }
   function insert(before: string, after = "", placeholder = "文字") {
-    if (mode() !== "edit") return;
+    if (mode() !== "edit" || busy() || uploading()) return;
     const start = textarea.selectionStart,
       end = textarea.selectionEnd;
     const selected = form.content.slice(start, end) || placeholder;
@@ -149,7 +153,37 @@ export default function Editor() {
       start + before.length + selected.length,
     );
   }
+  async function uploadImage(file?: File) {
+    if (!file || busy() || uploading()) return;
+    setError("");
+    setNotice("");
+    if (file.size > 10 * 1024 * 1024) {
+      setError("图片不能超过 10 MB，请选择较小的图片。");
+      imageInput.value = "";
+      return;
+    }
+    uploadGroup ||= Array.from(
+      crypto.getRandomValues(new Uint8Array(16)),
+      (n) => n.toString(16).padStart(2, "0"),
+    ).join("");
+    setUploading(true);
+    try {
+      const result = await api<{ url: string }>(`images?group=${uploadGroup}`, {
+        method: "POST",
+        body: file,
+      });
+      setUploading(false);
+      insert("\n![", `](${result.url})\n`, "图片描述");
+      setNotice("图片已上传并插入正文，发布时会保存到文章目录。");
+    } catch (e) {
+      fail(e);
+    } finally {
+      setUploading(false);
+      imageInput.value = "";
+    }
+  }
   async function save(status: "draft" | "published") {
+    if (busy() || uploading()) return;
     setError("");
     setNotice("");
     if (!form.title.trim()) {
@@ -167,6 +201,7 @@ export default function Editor() {
     try {
       const payload = {
         ...form,
+        uploadGroup: uploadGroup || undefined,
         status,
         tags: tagsText()
           .split(/[,，]/)
@@ -181,6 +216,8 @@ export default function Editor() {
       setForm("status", a.status);
       setForm("tags", a.tags);
       setForm("excerpt", a.excerpt);
+      setForm("content", a.content || "");
+      uploadGroup = "";
       setTagsText(a.tags.join(", "));
       markSaved();
       setParams({ id: a.id }, { replace: true });
@@ -190,6 +227,10 @@ export default function Editor() {
           ? "文章已发布，读者现在就能看见它。"
           : "草稿已保存，慢慢写，不着急。",
       );
+      if (mode() === "preview") {
+        setBusy(false);
+        await preview();
+      }
     } catch (e) {
       fail(e);
     } finally {
@@ -309,6 +350,7 @@ export default function Editor() {
                   <button
                     classList={{ selected: mode() === "edit" }}
                     aria-pressed={mode() === "edit"}
+                    disabled={busy() || uploading()}
                     onClick={() => setMode("edit")}
                   >
                     编辑
@@ -316,6 +358,7 @@ export default function Editor() {
                   <button
                     classList={{ selected: mode() === "preview" }}
                     aria-pressed={mode() === "preview"}
+                    disabled={busy() || uploading()}
                     onClick={preview}
                   >
                     预览
@@ -398,6 +441,25 @@ export default function Editor() {
                   ▦
                 </button>
               </div>
+              <div class="image-upload-row">
+                <input
+                  ref={imageInput}
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif"
+                  aria-label="选择要上传的图片"
+                  hidden
+                  onChange={(e) => void uploadImage(e.currentTarget.files?.[0])}
+                />
+                <button
+                  class="button image-upload-button"
+                  disabled={busy() || uploading() || mode() !== "edit"}
+                  onClick={() => imageInput.click()}
+                >
+                  <span aria-hidden="true">▧</span>
+                  {uploading() ? "正在上传…" : "上传图片"}
+                </button>
+                <span>PNG / JPEG / GIF，最大 10 MB</span>
+              </div>
               <Show when={mode() === "edit"}>
                 <textarea
                   ref={textarea}
@@ -408,6 +470,7 @@ export default function Editor() {
                     "从一个想法开始，慢慢写。\n\n## 一个小标题\n\n这里支持 **Markdown**，也支持你的每一种表达。"
                   }
                   value={form.content}
+                  readOnly={busy() || uploading()}
                   onInput={(e) => setForm("content", e.currentTarget.value)}
                 />
               </Show>
@@ -545,7 +608,7 @@ export default function Editor() {
             <div class="editor-buttons">
               <button
                 class="button"
-                disabled={busy()}
+                disabled={busy() || uploading()}
                 onClick={() => save("draft")}
               >
                 <Icon name="save" size={17} />
@@ -557,7 +620,7 @@ export default function Editor() {
               </button>
               <button
                 class="button primary"
-                disabled={busy()}
+                disabled={busy() || uploading()}
                 onClick={() => save("published")}
               >
                 <Icon name="arrow-up" size={17} />

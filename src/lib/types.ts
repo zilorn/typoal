@@ -17,7 +17,7 @@ export type Article = {
 export type ArticleInput = Pick<
   Article,
   "title" | "excerpt" | "category" | "tags" | "cover" | "status" | "featured"
-> & { content: string };
+> & { content: string; uploadGroup?: string };
 export type Site = { name: string; author: string; bio: string };
 
 export function formatDate(value: string, short = false) {

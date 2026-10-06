@@ -4,6 +4,8 @@ import { matchesOrigin } from "./origin";
 
 export async function proxy({ request }: APIEvent, path?: string) {
   const url = new URL(request.url);
+  const maxBodyBytes =
+    url.pathname === "/api/images" ? 10 * 1024 * 1024 : 2 * 1024 * 1024;
   if (!["GET", "HEAD"].includes(request.method)) {
     const fetchSite = request.headers.get("sec-fetch-site");
     if (
@@ -13,7 +15,7 @@ export async function proxy({ request }: APIEvent, path?: string) {
       return Response.json({ error: "请求来源无效" }, { status: 403 });
     }
     const size = Number(request.headers.get("content-length") || 0);
-    if (size > 2 * 1024 * 1024)
+    if (size > maxBodyBytes)
       return Response.json({ error: "提交内容过大" }, { status: 413 });
   }
   const headers = new Headers();
@@ -23,11 +25,32 @@ export async function proxy({ request }: APIEvent, path?: string) {
   }
   headers.set("x-forwarded-host", url.host);
   try {
-    const body = ["GET", "HEAD"].includes(request.method)
-      ? undefined
-      : await request.arrayBuffer();
-    if (body && body.byteLength > 2 * 1024 * 1024)
-      return Response.json({ error: "提交内容过大" }, { status: 413 });
+    let body: Uint8Array<ArrayBuffer> | undefined;
+    if (!["GET", "HEAD"].includes(request.method) && request.body) {
+      const reader = request.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > maxBodyBytes) {
+            await reader.cancel();
+            return Response.json({ error: "提交内容过大" }, { status: 413 });
+          }
+          chunks.push(value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      body = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        body.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+    }
     const response = await fetch(
       `${process.env.API_URL || "http://127.0.0.1:8080"}${path ?? url.pathname}${url.search}`,
       {

@@ -16,7 +16,12 @@ export async function api<T>(
     response = await fetch(`/api/${path}`, {
       ...options,
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json", ...options.headers },
+      headers: {
+        ...(options.body instanceof Blob
+          ? { "Content-Type": options.body.type || "application/octet-stream" }
+          : { "Content-Type": "application/json" }),
+        ...options.headers,
+      },
       signal: AbortSignal.timeout(15000),
     });
   } catch {
