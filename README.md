@@ -35,7 +35,7 @@
 
 生产与开发使用不同端口：**网页 42731，容器内 API 42732**，均监听 `0.0.0.0`。只有网页的 42731 端口映射到宿主机。
 
-先创建配置。已准备 Node / pnpm 时可以执行 `pnpm setup`；仅有 Docker 时：
+先创建配置。已准备 Node / pnpm 时可以执行 `pnpm setup`，它只依赖 Node.js，不需要先安装依赖，全新克隆的机器上也能直接运行；仅有 Docker 时：
 
 ```sh
 cp .env.example .env

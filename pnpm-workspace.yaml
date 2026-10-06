@@ -1,0 +1,5 @@
+# Bootstrap scripts such as `pnpm setup` must run on a fresh clone, before
+# node_modules exists. pnpm 11 defaults verifyDepsBeforeRun to "install", which
+# silently runs `pnpm install` first and hangs when the registry is unreachable.
+# "warn" keeps the reminder but never blocks the script.
+verifyDepsBeforeRun: warn
