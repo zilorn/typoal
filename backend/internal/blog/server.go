@@ -46,6 +46,12 @@ func NewServer(store *Store, config Config) (http.Handler, error) {
 		return nil, err
 	}
 	if hash == "" || config.ResetPassword {
+		// ADMIN_PASSWORD is only needed to seed a password the first time (or
+		// to reset it on request). Once a hash is stored, a deployment must
+		// start even when the environment variable is absent or invalid.
+		if !validPassword(config.Password) {
+			return nil, errors.New("ADMIN_PASSWORD must contain 12 to 512 bytes to set the initial administrator password; run pnpm setup to create local configuration")
+		}
 		if hash, err = hashPassword(config.Password); err != nil {
 			return nil, err
 		}

@@ -20,18 +20,13 @@ func env(key, fallback string) string {
 }
 
 func main() {
-	password := os.Getenv("ADMIN_PASSWORD")
-	if len(password) < 12 || len(password) > 512 {
-		slog.Error("ADMIN_PASSWORD must contain 12 to 512 bytes; run pnpm setup to create local configuration")
-		os.Exit(1)
-	}
 	store, err := blog.OpenStore(env("DATABASE_PATH", "./data/blog.db"))
 	if err != nil {
 		slog.Error("open database", "error", err)
 		os.Exit(1)
 	}
 	defer store.Close()
-	handler, err := blog.NewServer(store, blog.Config{Password: password, ResetPassword: env("ADMIN_PASSWORD_RESET", "false") == "true", CookieSecure: env("COOKIE_SECURE", "false") == "true", SiteName: env("SITE_NAME", "typoal"), AuthorName: env("AUTHOR_NAME", "typoal 作者"), AuthorBio: env("AUTHOR_BIO", "一个热爱创造的人，记录技术、生活与沿途的风景。")})
+	handler, err := blog.NewServer(store, blog.Config{Password: os.Getenv("ADMIN_PASSWORD"), ResetPassword: env("ADMIN_PASSWORD_RESET", "false") == "true", CookieSecure: env("COOKIE_SECURE", "false") == "true", SiteName: env("SITE_NAME", "typoal"), AuthorName: env("AUTHOR_NAME", "typoal 作者"), AuthorBio: env("AUTHOR_BIO", "一个热爱创造的人，记录技术、生活与沿途的风景。")})
 	if err != nil {
 		slog.Error("initialize server", "error", err)
 		os.Exit(1)

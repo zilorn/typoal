@@ -304,3 +304,46 @@ func TestChangePassword(t *testing.T) {
 		t.Fatal("reset password rejected")
 	}
 }
+
+func TestFreshStoreRequiresValidAdminPassword(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blog.db")
+	s, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, password := range []string{"", "short"} {
+		if _, err := NewServer(s, Config{Password: password}); err == nil {
+			t.Fatalf("fresh store accepted ADMIN_PASSWORD %q", password)
+		}
+	}
+}
+
+func TestStoredPasswordDoesNotRequireAdminPassword(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blog.db")
+	s, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewServer(s, Config{Password: "initial-password-value"}); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	s, err = OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	// ADMIN_PASSWORD only seeds the hash, so a deployment that already stored a
+	// password must start even when the variable is missing or invalid.
+	for _, password := range []string{"", "short"} {
+		h, err := NewServer(s, Config{Password: password})
+		if err != nil {
+			t.Fatalf("ADMIN_PASSWORD %q broke an initialized deployment: %v", password, err)
+		}
+		if got := request(h, "POST", "/api/auth/login", `{"password":"initial-password-value"}`, ""); got.Code != 200 {
+			t.Fatal("stored password rejected")
+		}
+	}
+}
