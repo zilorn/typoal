@@ -40,8 +40,10 @@
 ```sh
 cp .env.example .env
 # 编辑 .env，设置至少 12 个字符的 ADMIN_PASSWORD。
-docker compose up --build -d
+./deploy.sh
 ```
+
+`./deploy.sh` 先校验 `.env` 中的 `ADMIN_PASSWORD`（12–512 字节），通过后再执行 `docker compose up --build -d`；配置有误时会在开始构建前立即报错，不会等到构建结束才显示 unhealthy。
 
 访问 `http://服务器IP:42731`，通过 `/admin` 登录管理文章。
 
@@ -50,7 +52,7 @@ docker compose logs -f
 docker compose down
 ```
 
-`docker compose down` 保留 `typoal_blog-data` 数据卷。**不要使用 `down -v`，除非明确要删除所有文章。** 更新代码后重新运行 `docker compose up --build -d` 即可保留数据并重建服务。
+`docker compose down` 保留 `typoal_blog-data` 数据卷。**不要使用 `down -v`，除非明确要删除所有文章。** 更新代码后重新运行 `./deploy.sh` 即可保留数据并重建服务。
 
 对外提供 HTTPS 时，在反向代理中转发到 42731，保留原始 `Host`，并在 `.env` 设置 `COOKIE_SECURE=true` 后重启 API。首次部署没有任何文章，也不会自动插入示例内容。访问 `/admin` 登录后，点击“新建文章”开始写作。作者信息在 `.env` 中配置，修改后重建 API 服务。
 
